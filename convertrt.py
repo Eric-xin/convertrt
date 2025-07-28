@@ -83,17 +83,34 @@ class MainWindow(QWidget):
             pre, src, suf = m.group(1), m.group(2), m.group(3)
             if src.lower().startswith('data:'):
                 return m.group(0)
-            p = urlparse(src)
-            raw = unquote(p.path) if p.scheme=='file' else unquote(src)
-            if p.scheme=='file' and p.netloc:
-                raw = p.netloc + raw
-            raw = re.sub(r'^/+', '/', raw)
+
+            # 1) URL-style file:///
+            parsed = urlparse(src)
+            if parsed.scheme == 'file':
+                # parsed.path might be '/C:/…' on Windows; strip leading '/'
+                raw = unquote(parsed.path)
+                if raw.startswith('/') and raw[2] == ':':
+                    raw = raw.lstrip('/')
+                # handle file://C:/… too
+                if parsed.netloc and raw[1] == ':':
+                    raw = parsed.netloc + raw
+            else:
+                # 2) Unescaped Windows path “C:\…” or “C:/…” or URL-encoded in href
+                raw = unquote(src)
+                # If it looks like a Windows path without file://
+                if re.match(r'^[A-Za-z]:[\\/]', raw):
+                    # normalize backslashes
+                    raw = raw.replace('\\', '/')
+            
+            # 3) Now raw should be something like 'C:/Users/...'
             fp = Path(raw)
             if fp.is_file():
-                b = fp.read_bytes()
-                b64 = base64.b64encode(b).decode('ascii')
-                ext = fp.suffix.lstrip('.') or 'png'
+                data = fp.read_bytes()
+                b64 = base64.b64encode(data).decode('ascii')
+                ext = fp.suffix.lstrip('.').lower() or 'png'
                 return f'{pre}data:image/{ext};base64,{b64}{suf}'
+            
+            # fallback: leave original tag untouched
             return m.group(0)
 
         inlined = re.sub(
