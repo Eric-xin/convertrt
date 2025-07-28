@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        build-type: [Release]
+    env:
+      CMAKE_BUILD_DIR: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Qt6
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y qtbase6-dev qtbase6-dev-tools
+
+      - name: Install Qt6
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install qt@6
+          echo "::add-path::$(brew --prefix qt@6)/bin"
+
+      - name: Install Qt6
+        if: matrix.os == 'windows-latest'
+        run: choco install qt6 --version=6.5.0 -y
+
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v1 # or actions/setup-cmake@v3
+
+      - name: Configure with CMake
+        run: |
+          cmake -S . -B $CMAKE_BUILD_DIR \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+
+      - name: Build
+        run: cmake --build $CMAKE_BUILD_DIR --config ${{ matrix.build-type }} -- -j
+
+      - name: Upload executable
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: convertrt-${{ matrix.os }}-${{ matrix.build-type }}
+          path: ${{ matrix.os == 'windows-latest' && format('{0}\\{1}\\convertrt.exe', env.CMAKE_BUILD_DIR, matrix.build-type) || env.CMAKE_BUILD_DIR }}
