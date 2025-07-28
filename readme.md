@@ -84,7 +84,7 @@ convertrt/
 ### Run
 
 ```sh
-python word_paste_gui.py
+python convertrt.py
 ```
 
 ---
