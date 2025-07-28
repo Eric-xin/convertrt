@@ -1,6 +1,6 @@
 name: CMake-Ubuntu
 
-on: [pull_request,push]
+on: [pull_request, push]
 
 jobs:
   build:
@@ -20,13 +20,14 @@ jobs:
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
-          version: ${{ matrix.qt_version }}
-          cache: 'true'
-          cache-key-prefix: ${{ runner.os }}-Qt-Cache-${{ matrix.qt_version }}
-          dir: ${{ github.workspace }}/Qt
+        version: ${{ matrix.qt_version }}
+        cache: 'true'
+        cache-key-prefix: ${{ runner.os }}-Qt-Cache-${{ matrix.qt_version }}
+        dir: ${{ github.workspace }}/Qt
 
     - name: Install Linux dependencies
       run: |
+        sudo apt update
         sudo apt install -y libgl1-mesa-dev libxcb1-dev libgtk-3-dev
 
     - name: Configure CMake
@@ -34,3 +35,12 @@ jobs:
 
     - name: Build
       run: cmake --build ${{github.workspace}}/build
+
+    - name: Upload Linux build
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: convertrt-ubuntu-${{ matrix.qt_version }}-shared-${{ matrix.shared }}
+        path: |
+          build/**/convertrt
+          build/**/*.so
