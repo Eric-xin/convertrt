@@ -19,36 +19,46 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install Qt6
+      - name: Install Qt6 on Linux
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y qtbase6-dev qtbase6-dev-tools
+        run: |
+          sudo apt-get update
+          # ubuntu-latest is 22.04, Qt6 packages use these names:
+          sudo apt-get install -y \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-qmake
 
-      - name: Install Qt6
+      - name: Install Qt6 on macOS
         if: matrix.os == 'macos-latest'
         run: |
           brew update
           brew install qt@6
           echo "::add-path::$(brew --prefix qt@6)/bin"
 
-      - name: Install Qt6
+      - name: Install Qt6 on Windows
         if: matrix.os == 'windows-latest'
         run: choco install qt6 --version=6.5.0 -y
 
-      - name: Install CMake
-        uses: jwlawson/actions-setup-cmake@v1 # or actions/setup-cmake@v3
+      - name: Setup CMake
+        uses: actions/setup-cmake@v3
 
-      - name: Configure with CMake
-        run: |
-          cmake -S . -B $CMAKE_BUILD_DIR \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+      - name: Configure
+        run: cmake -S . -B $CMAKE_BUILD_DIR -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
 
       - name: Build
         run: cmake --build $CMAKE_BUILD_DIR --config ${{ matrix.build-type }} -- -j
 
-      - name: Upload executable
-        if: success()
+      - name: Upload Windows executable
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: convertrt-windows-${{ matrix.build-type }}
+          path: build\\${{ matrix.build-type }}\\convertrt.exe
+
+      - name: Upload Unix executable
+        if: matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: convertrt-${{ matrix.os }}-${{ matrix.build-type }}
-          path: |
-            ${{ matrix.os == 'windows-latest' && format('build\\%s\\convertrt.exe', matrix.build-type) || format('build/%s/convertrt', matrix.build-type) }}
+          path: build/${{ matrix.build-type }}/convertrt
