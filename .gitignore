@@ -1,0 +1,56 @@
+# Build directory
+/build/
+/CMakeFiles/
+/CMakeCache.txt
+/*.cmake
+/*.make
+Makefile
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+
+# Qt MOC/UI/RCC generated files (if any)
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+*.creator.user
+*.user
+*.user.*
+*.qmlproject.user
+
+# IDE / Editor
+.vscode/
+.idea/
+/*.sw?
+*~ 
+*.sublime-project
+*.sublime-workspace
+
+# Mac-specific
+.DS_Store
+
+# Backup and temporary files
+*.backup
+*.tmp
+*.obj
+*.o
+*.so
+*.exe
+*.dll
+*.dylib
+*.log
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# Generated documentation
+docs/html/
+
+# Other
+*.cover
