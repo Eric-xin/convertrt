@@ -47,7 +47,8 @@ jobs:
 
       - name: Upload executable
         if: success()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: convertrt-${{ matrix.os }}-${{ matrix.build-type }}
-          path: ${{ matrix.os == 'windows-latest' && format('{0}\\{1}\\convertrt.exe', env.CMAKE_BUILD_DIR, matrix.build-type) || env.CMAKE_BUILD_DIR }}
+          path: |
+            ${{ matrix.os == 'windows-latest' && format('build\\%s\\convertrt.exe', matrix.build-type) || format('build/%s/convertrt', matrix.build-type) }}
