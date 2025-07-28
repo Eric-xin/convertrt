@@ -1,0 +1,34 @@
+name: CMake-Mac
+
+on: [pull_request,push]
+
+jobs:
+  macos:
+    runs-on: macos-${{ matrix.macos_version }}
+    name: macos-${{ matrix.macos_version }}-Qt-${{ matrix.qt_version }}-shared-${{ matrix.shared }}
+    strategy:
+      fail-fast: false
+      matrix:
+        macos_version: [latest]
+        qt_version: [6.5.*]
+        shared: [ON]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+            version: ${{ matrix.qt_version }}
+            cache: 'true'
+            cache-key-prefix: ${{ runner.os }}-Qt-Cache-${{ matrix.qt_version }}
+            dir: ${{ github.workspace }}/Qt
+            host: 'mac'
+            arch: 'clang_64'
+
+      - name: Configure CMake
+        run: cmake -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DBUILD_EXAMPLES=OFF -B "${{github.workspace}}/build"
+
+      - name: Build
+        run: cmake --build ${{github.workspace}}/build
