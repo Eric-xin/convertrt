@@ -9,37 +9,35 @@ jobs:
     name: windows-${{ matrix.win_version }}-Qt-${{ matrix.qt_version }}-shared-${{ matrix.shared }}
     runs-on: windows-${{ matrix.win_version }}
     strategy:
-        fail-fast: false
-        matrix:
-            win_version: [latest]
-            qt_version: [6.5.*]
-            shared: [ON]
+      fail-fast: false
+      matrix:
+        win_version: [latest]
+        qt_version: [6.5.*]
+        shared: [ON]
 
     steps:
       - uses: actions/checkout@v3
 
       - uses: jurplel/install-qt-action@v3
         with:
-            version: ${{ matrix.qt_version }}
-            cache: true
-            cache-key-prefix: ${{ runner.os }}-Qt-Cache-${{ matrix.qt_version }}
-            dir: ${{ github.workspace }}/Qt
-            host: windows
-            arch: win64_msvc2019_64
+          version: ${{ matrix.qt_version }}
+          cache: true
+          cache-key-prefix: ${{ runner.os }}-Qt-Cache-${{ matrix.qt_version }}
+          dir: ${{ github.workspace }}/Qt
+          host: windows
+          arch: win64_msvc2019_64
 
       - name: Configure CMake
         run: cmake -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DBUILD_EXAMPLES=OFF -B "${{ github.workspace }}/build"
 
       - name: Build
         run: cmake --build "${{ github.workspace }}/build"
-
+    
       - name: Upload Windows build
-        if: always()   # still runs even if the build step fails
+        if: always()  # still runs even if the build step fails
         uses: actions/upload-artifact@v4
         with:
-          name: convertrt-windows-${{ matrix.qt_version }}-${{ matrix.shared }}
+          name: convertrt-windows-qt6.5-shared-${{ matrix.shared }}
           path: |
             build\**\*.exe
             build\**\*.dll
-            build\**\*.pdb
-            build\**\*.zip

@@ -1,6 +1,6 @@
 name: CMake-Mac
 
-on: [pull_request, push]
+on: [pull_request,push]
 
 jobs:
   macos:
@@ -20,27 +20,15 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: ${{ matrix.qt_version }}
-          cache: 'true'
-          cache-key-prefix: ${{ runner.os }}-Qt-Cache-${{ matrix.qt_version }}
-          dir: ${{ github.workspace }}/Qt
-          host: 'mac'
-          arch: 'clang_64'
+            version: ${{ matrix.qt_version }}
+            cache: 'true'
+            cache-key-prefix: ${{ runner.os }}-Qt-Cache-${{ matrix.qt_version }}
+            dir: ${{ github.workspace }}/Qt
+            host: 'mac'
+            arch: 'clang_64'
 
       - name: Configure CMake
-        run: cmake \
-          -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
-          -DBUILD_EXAMPLES=OFF \
-          -B "${{ github.workspace }}/build"
+        run: cmake -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DBUILD_EXAMPLES=OFF -B "${{github.workspace}}/build"
 
       - name: Build
-        run: cmake --build "${{ github.workspace }}/build"
-
-      - name: Upload macOS build
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: convertrt-macos-${{ matrix.qt_version }}-shared-${{ matrix.shared }}
-          path: |
-            build/**/convertrt
-            build/**/*.dylib
+        run: cmake --build ${{github.workspace}}/build
