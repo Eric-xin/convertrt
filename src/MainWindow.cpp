@@ -1,204 +1,371 @@
 #include "MainWindow.h"
-
-#include <QApplication>
-#include <QClipboard>
-#include <QFile>
-#include <QFileInfo>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QMimeData>
-#include <QPlainTextEdit>
+#include <QTextEdit>
+#include <QTextBrowser>
 #include <QPushButton>
 #include <QSplitter>
-#include <QSyntaxHighlighter>
-#include <QTextCharFormat>
-#include <QTextDocument>
-#include <QTextEdit>
-#include <QUrl>
+#include <QLabel>
 #include <QVBoxLayout>
-#include <QRegularExpression>
-#include <QRegularExpressionMatchIterator>
-#include <QByteArray>
-#include <QIODevice>
-#include <QBuffer>
+#include <QHBoxLayout>
+#include <QClipboard>
+#include <QMimeData>
+#include <QGuiApplication>
+#include <QProgressDialog>
+#include <QMessageBox>
+#include <QFile>
+#include <QFileInfo>
+#include <QMimeDatabase>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QEventLoop>
+#include <QtNetwork/QHttpMultiPart>
+#include <QtNetwork/QNetworkReply>
+#include <QDateTime>
+#include <QCryptographicHash>
+#include <QtNetwork/QNetworkReply>
+#include <QtNetwork/QNetworkRequest>
+#include <QJsonArray>
+#include <QJsonValue>
+#include <QCryptographicHash>
+#include <QMessageAuthenticationCode>
+#include <QtNetwork/QHttpPart>
+#include <QDebug>
 
-// Highlighter for “[Image omitted #n]”
-class ImageMarkerHighlighter : public QSyntaxHighlighter {
-public:
-    ImageMarkerHighlighter(QTextDocument *doc)
-        : QSyntaxHighlighter(doc),
-          pattern_(R"(\[Image omitted #\d+\])")
-    {
-        fmt_.setBackground(Qt::yellow);
+#include <QSettings>
+
+// Load endpoints from config file (e.g., config.ini in the application directory)
+static QSettings settings(QStringLiteral("config.ini"), QSettings::IniFormat);
+
+static const QString STS_URL        = settings.value("oss/sts_url").toString();
+static const QString OSS_UPLOAD_URL = settings.value("oss/oss_upload_url").toString();
+static const QString OSS_BASE_URL   = settings.value("oss/oss_base_url").toString();
+
+ImageMarkerHighlighter::ImageMarkerHighlighter(QTextDocument *doc)
+    : QSyntaxHighlighter(doc),
+      _pattern(QStringLiteral("\\[Image omitted #\\d+\\]"))
+{
+    _format.setBackground(Qt::yellow);
+}
+
+void ImageMarkerHighlighter::highlightBlock(const QString &text) {
+    auto it = _pattern.globalMatch(text);
+    while (it.hasNext()) {
+        auto m = it.next();
+        setFormat(m.capturedStart(), m.capturedLength(), _format);
     }
-
-protected:
-    void highlightBlock(const QString &text) override {
-        QRegularExpression re(pattern_);
-        auto it = re.globalMatch(text);
-        while (it.hasNext()) {
-            auto match = it.next();
-            setFormat(match.capturedStart(), match.capturedLength(), fmt_);
-        }
-    }
-
-private:
-    QRegularExpression pattern_;
-    QTextCharFormat fmt_;
-};
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QWidget(parent)
 {
+    setWindowTitle("Word-to-HTML/RTF Converter");
+
     auto *splitter = new QSplitter(Qt::Horizontal, this);
 
     // Left pane
+    _srcEdit = new QTextEdit;
+    _srcEdit->setAcceptRichText(false);
+    new ImageMarkerHighlighter(_srcEdit->document());
     auto *leftW = new QWidget;
-    auto *leftL = new QVBoxLayout(leftW);
-    leftL->setContentsMargins(0,0,0,0);
-    leftL->addWidget(new QLabel("HTML Source (plain text):"));
-    srcEdit_ = new QPlainTextEdit;
-    leftL->addWidget(srcEdit_);
-    new ImageMarkerHighlighter(srcEdit_->document());
+    auto *lLayout = new QVBoxLayout(leftW);
+    lLayout->setContentsMargins(0,0,0,0);
+    lLayout->addWidget(new QLabel("HTML Source (plain text):"));
+    lLayout->addWidget(_srcEdit);
 
     // Right pane
+    _preview = new QTextBrowser;
+    _preview->setOpenExternalLinks(true);
+    _preview->setReadOnly(false);
     auto *rightW = new QWidget;
-    auto *rightL = new QVBoxLayout(rightW);
-    rightL->setContentsMargins(0,0,0,0);
-    rightL->addWidget(new QLabel("Rendered Preview:"));
-    previewEdit_ = new QTextEdit;
-    rightL->addWidget(previewEdit_);
+    auto *rLayout = new QVBoxLayout(rightW);
+    rLayout->setContentsMargins(0,0,0,0);
+    rLayout->addWidget(new QLabel("Rendered Preview:"));
+    rLayout->addWidget(_preview);
 
     splitter->addWidget(leftW);
     splitter->addWidget(rightW);
-    splitter->setStretchFactor(0,1);
-    splitter->setStretchFactor(1,1);
 
     // Buttons
-    auto *btnL = new QHBoxLayout;
-    auto *pasteBtn = new QPushButton("Paste from Word");
-    auto *copyHtmlBtn = new QPushButton("Copy as HTML");
-    auto *copyRtfBtn  = new QPushButton("Copy as Rich Text");
-    btnL->addWidget(pasteBtn);
-    btnL->addWidget(copyHtmlBtn);
-    btnL->addWidget(copyRtfBtn);
-    btnL->addStretch();
+    auto *buttonLayout = new QHBoxLayout;
+    QPushButton *pasteBtn     = new QPushButton("Paste from Word");
+    QPushButton *copyHtmlBtn  = new QPushButton("Copy as HTML");
+    QPushButton *copyRtfBtn   = new QPushButton("Copy as Rich Text");
+    QPushButton *confirmBtn   = new QPushButton("Confirm");
+    buttonLayout->addWidget(pasteBtn);
+    buttonLayout->addWidget(copyHtmlBtn);
+    buttonLayout->addWidget(copyRtfBtn);
+    buttonLayout->addWidget(confirmBtn);
+    buttonLayout->addStretch();
 
-    auto *mainL = new QVBoxLayout(this);
-    mainL->addWidget(splitter);
-    mainL->addLayout(btnL);
+    auto *mainLayout = new QVBoxLayout(this);
+    mainLayout->addWidget(splitter);
+    mainLayout->addLayout(buttonLayout);
 
+    // Connections
     connect(pasteBtn,    &QPushButton::clicked, this, &MainWindow::pasteFromWord);
     connect(copyHtmlBtn, &QPushButton::clicked, this, &MainWindow::copyHtml);
     connect(copyRtfBtn,  &QPushButton::clicked, this, &MainWindow::copyRtf);
-    connect(srcEdit_,    &QPlainTextEdit::textChanged, this, &MainWindow::syncFromSource);
-    connect(previewEdit_,&QTextEdit::textChanged,      this, &MainWindow::syncFromPreview);
+    connect(confirmBtn,  &QPushButton::clicked, this, &MainWindow::confirmAndUpload);
+    connect(_srcEdit,    &QTextEdit::textChanged, this, &MainWindow::syncFromSource);
+    connect(_preview,    &QTextBrowser::textChanged, this, &MainWindow::syncFromPreview);
+}
+
+std::pair<QString, QString> MainWindow::inlineAndMask(const QString &html) {
+    QString inl = html;
+    QRegularExpression reImg(R"(<img\b[^>]+src=['"]([^'"]+)['"][^>]*>)",
+                             QRegularExpression::CaseInsensitiveOption);
+    int pos = 0;
+    QRegularExpressionMatch m;
+    while ((m = reImg.match(inl, pos)).hasMatch()) {
+        QString header;
+        QByteArray data = fetchLocalImage(m.captured(1), header);
+        if (!data.isEmpty()) {
+            QString tag = m.captured(0);
+            tag.replace(m.captured(1), header + QString::fromLatin1(data.toBase64()));
+            inl.replace(m.capturedStart(), m.capturedLength(), tag);
+            pos = m.capturedStart() + tag.length();
+        } else {
+            pos = m.capturedEnd();
+        }
+    }
+
+    _imgTags = inl.split(QRegularExpression(R"(<img\b[^>]*>)"), Qt::SkipEmptyParts);
+
+    QString masked;
+    int count = 0;
+    QRegularExpression reAll(R"(<img\b[^>]*>)",
+                             QRegularExpression::CaseInsensitiveOption);
+    pos = 0;
+    while ((m = reAll.match(inl, pos)).hasMatch()) {
+        masked += inl.mid(pos, m.capturedStart() - pos);
+        masked += QString("\n[Image omitted #%1]\n").arg(++count);
+        pos = m.capturedEnd();
+    }
+    masked += inl.mid(pos);
+    return { inl, masked };
+}
+
+QByteArray MainWindow::fetchLocalImage(const QString &src, QString &header) {
+    QUrl url(src);
+    QString raw = url.isLocalFile() ? url.toLocalFile() : QString(src).replace('\\','/');
+    QFileInfo fi(raw);
+    if (!fi.exists()) return {};
+    QFile f(fi.absoluteFilePath());
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    QByteArray bytes = f.readAll();
+    QString mime = QMimeDatabase().mimeTypeForFile(fi).name();
+    header = QString("data:%1;base64,").arg(mime);
+    return bytes;
 }
 
 void MainWindow::pasteFromWord() {
-    const QMimeData *md = QApplication::clipboard()->mimeData();
-    QString raw = md->hasHtml() ? md->html() : (md->hasText() ? md->text() : QString());
+    auto *cb = QGuiApplication::clipboard();
+    QString raw = cb->mimeData()->hasHtml()
+                ? cb->mimeData()->html()
+                : cb->mimeData()->hasText()
+                  ? cb->mimeData()->text()
+                  : QString();
     if (raw.isEmpty()) return;
-
-    fullHtml_ = inlineAndNumber(raw);
-    srcEdit_->blockSignals(true);
-    srcEdit_->setPlainText(maskedHtml_);
-    srcEdit_->blockSignals(false);
-
-    previewEdit_->blockSignals(true);
-    previewEdit_->setHtml(fullHtml_);
-    previewEdit_->blockSignals(false);
-    syncing_ = false;
+    auto [inl, masked] = inlineAndMask(raw);
+    _fullHtml = inl;
+    _syncing = true;
+    _srcEdit->setPlainText(masked);
+    _preview->setHtml(inl);
+    _syncing = false;
 }
 
 void MainWindow::syncFromSource() {
-    if (syncing_) return;
-    syncing_ = true;
-
-    QString text = srcEdit_->toPlainText();
-    QRegularExpression re(R"(\[Image omitted #(\d+)\])");
-    auto it = re.globalMatch(text);
+    if (_syncing) return;
+    _syncing = true;
+    QString text = _srcEdit->toPlainText();
     QString out;
-    int lastPos = 0;
-    while (it.hasNext()) {
-        auto m = it.next();
-        out += text.mid(lastPos, m.capturedStart() - lastPos);
-        int idx = m.captured(1).toInt() - 1;
-        if (idx >= 0 && idx < imgTags_.size())
-            out += imgTags_[idx];
-        lastPos = m.capturedEnd();
+    auto parts = text.split(QRegularExpression(R"(\[Image omitted #\d+\])"),
+                            Qt::KeepEmptyParts);
+    for (const auto &p : parts) {
+        QRegularExpression re(R"(\[Image omitted #(\d+)\])");
+        auto m = re.match(p);
+        if (m.hasMatch()) {
+            int idx = m.captured(1).toInt() - 1;
+            if (idx >= 0 && idx < _imgTags.size())
+                out += _imgTags[idx];
+        } else {
+            out += p;
+        }
     }
-    out += text.mid(lastPos);
-
-    previewEdit_->blockSignals(true);
-    previewEdit_->setHtml(out);
-    previewEdit_->blockSignals(false);
-
-    syncing_ = false;
+    _preview->setHtml(out);
+    _syncing = false;
 }
 
 void MainWindow::syncFromPreview() {
-    if (syncing_) return;
-    syncing_ = true;
-    QString raw = previewEdit_->toHtml();
-    fullHtml_ = inlineAndNumber(raw);
-    srcEdit_->blockSignals(true);
-    srcEdit_->setPlainText(maskedHtml_);
-    srcEdit_->blockSignals(false);
-    syncing_ = false;
+    if (_syncing) return;
+    _syncing = true;
+    auto [inl, masked] = inlineAndMask(_preview->toHtml());
+    _fullHtml = inl;
+    _srcEdit->setPlainText(masked);
+    _syncing = false;
 }
 
 void MainWindow::copyHtml() {
-    QApplication::clipboard()->setText(fullHtml_, QClipboard::Clipboard);
+    QGuiApplication::clipboard()->setText(_fullHtml);
 }
 
 void MainWindow::copyRtf() {
-    QTextEdit temp;
-    temp.setHtml(fullHtml_);
-    temp.selectAll();
-    temp.copy();
+    QTextEdit tmp;
+    tmp.setHtml(_fullHtml);
+    tmp.selectAll();
+    tmp.copy();
 }
 
-QString MainWindow::makeMasked(const QString &inlined) {
-    QString masked;
-    int lastPos = 0;
-    int counter = 0;
-    QRegularExpression reImg(R"(<img\b[^>]*>)", QRegularExpression::CaseInsensitiveOption);
-    auto it = reImg.globalMatch(inlined);
-    while (it.hasNext()) {
-        auto m = it.next();
-        masked += inlined.mid(lastPos, m.capturedStart() - lastPos);
-        counter++;
-        masked += QString("\n[Image omitted #%1]\n").arg(counter);
-        lastPos = m.capturedEnd();
-    }
-    masked += inlined.mid(lastPos);
-    return masked;
-}
+void MainWindow::confirmAndUpload() {
+    QRegularExpression re(R"(data:image/[^;]+;base64,[^"']+)");
+    auto it = re.globalMatch(_fullHtml);
+    QStringList uris;
+    while (it.hasNext()) uris << it.next().captured(0);
+    uris.removeDuplicates();
+    int total = uris.size();
+    if (!total) return;
 
-QString MainWindow::inlineAndNumber(const QString &html) {
-    imgTags_.clear();
-    QString inlined = html;
-    QRegularExpression re(R"(<img\b[^>]+src=['"]([^'"]+)['"][^>]*>)", QRegularExpression::CaseInsensitiveOption);
-    auto it = re.globalMatch(inlined);
-    while (it.hasNext()) {
-        auto m = it.next();
-        QString tag = m.captured(0);
-        QString src = m.captured(1);
-        if (!src.startsWith("data:")) {
-            QUrl url(src);
-            QString path = url.isLocalFile() ? url.toLocalFile() : QUrl::fromPercentEncoding(src.toUtf8());
-            QFileInfo fi(path);
-            if (fi.exists() && fi.isFile()) {
-                QFile f(path);
-                f.open(QIODevice::ReadOnly);
-                QByteArray data = f.readAll().toBase64();
-                QString ext = fi.suffix().toLower();
-                tag.replace(src, QString("data:image/%1;base64,%2").arg(ext, QString(data)));
-            }
+    QProgressDialog pd("Uploading images…", "Cancel", 0, total, this);
+    pd.setWindowModality(Qt::WindowModal);
+    pd.show();
+
+    int success = 0;
+    QString newHtml = _fullHtml;
+
+    for (int i = 0; i < uris.size(); ++i) {
+        if (pd.wasCanceled()) break;
+        QString uri = uris.at(i);
+        QString header = uri.section(',', 0, 0) + ",";
+        QByteArray data = QByteArray::fromBase64(uri.section(',', 1).toLatin1());
+        try {
+            QString url = uploadToOss(header, data);
+            newHtml.replace(uri, url);
+            ++success;
+        } catch (...) {
         }
-        imgTags_ << tag;
+        pd.setValue(i + 1);
+        pd.setLabelText(QString("%1/%2 — %3 succeeded")
+                        .arg(i+1).arg(total).arg(success));
+        QCoreApplication::processEvents();
     }
-    maskedHtml_ = makeMasked(inlined);
-    return inlined;
+    pd.close();
+
+    _fullHtml = newHtml;
+    _syncing = true;
+    _srcEdit->setPlainText(newHtml);
+    _preview->setHtml(newHtml);
+    _syncing = false;
+
+    QMessageBox::information(this, "Upload Complete",
+        QString("Uploaded %1 of %2 images successfully.").arg(success).arg(total));
+}
+
+QJsonObject MainWindow::fetchSts() {
+    QNetworkRequest req((QUrl(STS_URL)));
+    // auto *reply = _networkManager.get(req);
+    QNetworkReply *reply = _networkManager.get(req);
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+    if (reply->error() != QNetworkReply::NoError)
+        throw QString(reply->errorString());
+    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+    return doc.object().value("data").toObject();
+}
+
+QString MainWindow::uploadToOss(const QString &header, const QByteArray &data) {
+    // Debug: Check if URLs are loaded correctly
+    qDebug() << "STS_URL:" << STS_URL;
+    qDebug() << "OSS_UPLOAD_URL:" << OSS_UPLOAD_URL;
+    qDebug() << "OSS_BASE_URL:" << OSS_BASE_URL;
+    
+    if (STS_URL.isEmpty() || OSS_UPLOAD_URL.isEmpty() || OSS_BASE_URL.isEmpty()) {
+        throw QString("Configuration not loaded properly. Check config.ini file.");
+    }
+
+    auto creds = fetchSts();
+    qDebug() << "STS credentials fetched successfully";
+    
+    qint64 expire = QDateTime::currentSecsSinceEpoch() + 3600;
+    
+    QJsonObject policy;
+    // Use UTC time format like in Python version
+    policy["expiration"] = QDateTime::fromSecsSinceEpoch(expire).toUTC().toString("yyyy-MM-ddThh:mm:ssZ");
+    QJsonArray inner;
+    inner << QJsonValue(QStringLiteral("content-length-range"))
+          << QJsonValue(0)
+          << QJsonValue(1024*1024*1024);
+    QJsonArray conditions;
+    conditions << QJsonValue(inner);
+    policy["conditions"] = conditions;
+    QByteArray p64 = QJsonDocument(policy).toJson(QJsonDocument::Compact).toBase64();
+    
+    // Use HMAC-SHA1 for signature (proper HMAC implementation)
+    QByteArray key = creds["accessKeySecret"].toString().toUtf8();
+    QByteArray sig = QMessageAuthenticationCode::hash(p64, key, QCryptographicHash::Sha1).toBase64();
+
+    qDebug() << "Policy (base64):" << p64;
+    qDebug() << "Signature:" << sig;
+    qDebug() << "AccessKeyId:" << creds["accessKeyId"].toString();
+
+    QString mime = header.section(';',0,0).section(':',1,1);
+    QString ext  = mime.section('/',1,1).toLower();
+    if (ext == "jpeg") ext = "jpg";
+    
+    // Use the same path format as Python version
+    QString objectKey = QString("pc/course/dev/%1.%2")
+                  .arg(QString::number(QDateTime::currentSecsSinceEpoch()*1000), ext);
+
+    qDebug() << "Uploading to key:" << objectKey;
+    qDebug() << "MIME type:" << mime;
+
+    // Try manual multipart construction to match Python version exactly
+    QByteArray boundary = "----formdata-qt-" + QString::number(QDateTime::currentMSecsSinceEpoch()).toUtf8();
+    QByteArray multipartData;
+    
+    auto addFormField = [&](const QByteArray &name, const QByteArray &value) {
+        multipartData += "--" + boundary + "\r\n";
+        multipartData += "Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n";
+        multipartData += value + "\r\n";
+    };
+    
+    // Add form fields in exact order as Python
+    addFormField("key", objectKey.toUtf8());
+    addFormField("policy", p64);
+    addFormField("OSSAccessKeyId", creds["accessKeyId"].toString().toUtf8());
+    addFormField("signature", sig);
+    addFormField("x-oss-security-token", creds["securityToken"].toString().toUtf8());
+    addFormField("success_action_status", "200");
+    
+    // Add file part
+    multipartData += "--" + boundary + "\r\n";
+    multipartData += "Content-Disposition: form-data; name=\"file\"; filename=\"image." + ext.toUtf8() + "\"\r\n";
+    multipartData += "Content-Type: " + mime.toUtf8() + "\r\n\r\n";
+    multipartData += data;
+    multipartData += "\r\n--" + boundary + "--\r\n";
+
+    QNetworkRequest req((QUrl(OSS_UPLOAD_URL)));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "multipart/form-data; boundary=" + boundary);
+    req.setHeader(QNetworkRequest::ContentLengthHeader, multipartData.size());
+    
+    qDebug() << "Content-Type:" << req.header(QNetworkRequest::ContentTypeHeader).toString();
+    qDebug() << "Content-Length:" << multipartData.size();
+    
+    QNetworkReply *reply = _networkManager.post(req, multipartData);
+
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    // Debug output
+    qDebug() << "Upload response status:" << reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    qDebug() << "Upload response:" << reply->readAll();
+
+    if (reply->error() != QNetworkReply::NoError) {
+        QString errorMsg = QString("Upload failed: %1 (HTTP %2)")
+                          .arg(reply->errorString())
+                          .arg(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt());
+        throw errorMsg;
+    }
+
+    return OSS_BASE_URL + "/" + objectKey;
 }

@@ -1,30 +1,51 @@
 #pragma once
 
 #include <QWidget>
-#include <QPlainTextEdit>
-#include <QTextEdit>
-#include <QVector>
+#include <QRegularExpression>
+#include <QtNetwork/QNetworkAccessManager>
+#include <QtNetwork/QNetworkReply>
+#include <QtNetwork/QNetworkRequest>
+#include <QSyntaxHighlighter>
+#include <QTextCharFormat>
+
+class QTextEdit;
+class QTextBrowser;
+class QProgressDialog;
+
+class ImageMarkerHighlighter : public QSyntaxHighlighter {
+    Q_OBJECT
+public:
+    explicit ImageMarkerHighlighter(QTextDocument *doc);
+protected:
+    void highlightBlock(const QString &text) override;
+private:
+    QRegularExpression _pattern;
+    QTextCharFormat   _format;
+};
 
 class MainWindow : public QWidget {
     Q_OBJECT
-
 public:
     explicit MainWindow(QWidget *parent = nullptr);
 
 private slots:
     void pasteFromWord();
-    void syncFromSource();
-    void syncFromPreview();
     void copyHtml();
     void copyRtf();
+    void confirmAndUpload();
+    void syncFromSource();
+    void syncFromPreview();
 
 private:
-    QString makeMasked(const QString &inlined);
-    QString inlineAndNumber(const QString &html);
+    std::pair<QString, QString> inlineAndMask(const QString &html);
+    QByteArray fetchLocalImage(const QString &src, QString &header);
+    QJsonObject fetchSts();
+    QString uploadToOss(const QString &header, const QByteArray &data);
 
-    QPlainTextEdit *srcEdit_;
-    QTextEdit      *previewEdit_;
-    QString         fullHtml_, maskedHtml_;
-    QVector<QString> imgTags_;
-    bool            syncing_ = false;
+    QTextEdit          *_srcEdit;
+    QTextBrowser       *_preview;
+    QString             _fullHtml;
+    QStringList         _imgTags;
+    bool                _syncing = false;
+    QNetworkAccessManager _networkManager;
 };

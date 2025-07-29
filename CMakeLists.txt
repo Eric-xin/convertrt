@@ -6,7 +6,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 COMPONENTS Widgets REQUIRED)
+find_package(Qt6 COMPONENTS Widgets Network REQUIRED)
 
 add_executable(convertrt
     src/main.cpp
@@ -15,5 +15,5 @@ add_executable(convertrt
 )
 
 target_link_libraries(convertrt
-    PRIVATE Qt6::Widgets
+    PRIVATE Qt6::Widgets Qt6::Network
 )
