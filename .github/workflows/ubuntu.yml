@@ -30,16 +30,59 @@ jobs:
         sudo apt install -y libgl1-mesa-dev libxcb1-dev libgtk-3-dev
 
     - name: Configure CMake
-      run: cmake -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DBUILD_EXAMPLES=OFF -B "${{github.workspace}}/build"
+      run: cmake -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DBUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release -B "${{github.workspace}}/build"
 
     - name: Build
-      run: cmake --build ${{github.workspace}}/build
+      run: cmake --build ${{github.workspace}}/build --config Release
+
+    - name: Create deployment package
+      run: |
+        # Create deployment directory
+        mkdir -p deploy/convertrt
+        
+        # Find and copy the executable
+        find build -name "convertrt" -type f -executable -exec cp {} deploy/convertrt/ \;
+        
+        # Copy config file if it exists
+        if [ -f "config.ini" ]; then
+          cp config.ini deploy/convertrt/
+        fi
+        
+        # Copy any shared libraries that might be needed
+        find build -name "*.so*" -type f -exec cp {} deploy/convertrt/ \; 2>/dev/null || true
+        
+        # Create a launcher script
+        cat > deploy/convertrt/run.sh << 'EOF'
+        #!/bin/bash
+        # Launcher script for convertrt
+        cd "$(dirname "$0")"
+        export LD_LIBRARY_PATH=".:$LD_LIBRARY_PATH"
+        ./convertrt "$@"
+        EOF
+        chmod +x deploy/convertrt/run.sh
+        
+        # Create a simple README
+        cat > deploy/convertrt/README.txt << 'EOF'
+        ConvertRT - Word to HTML/RTF Converter
+        
+        To run the application:
+        1. ./run.sh
+        2. Or directly: ./convertrt
+        
+        Make sure you have Qt6 installed on your system.
+        
+        Requirements:
+        - Qt6 Widgets and Network modules
+        - Linux with X11 or Wayland
+        EOF
+        
+        # List contents for debugging
+        echo "Deployment package contents:"
+        find deploy -type f -ls
     
     - name: Upload Ubuntu build
-      if: always()   # still runs even if the build step fails
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: convertrt-ubuntu-qt6.5-shared-${{ matrix.shared }}
-        path: |
-          build/**/*.deb
-          build/**/*.so
+        name: convertrt-ubuntu-qt6-ready-to-use
+        path: deploy/**

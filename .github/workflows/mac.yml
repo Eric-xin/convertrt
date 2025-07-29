@@ -28,16 +28,93 @@ jobs:
             arch: 'clang_64'
 
       - name: Configure CMake
-        run: cmake -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DBUILD_EXAMPLES=OFF -B "${{github.workspace}}/build"
+        run: cmake -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DBUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release -B "${{github.workspace}}/build"
 
       - name: Build
-        run: cmake --build ${{github.workspace}}/build
+        run: cmake --build ${{github.workspace}}/build --config Release
+
+      - name: Create macOS app bundle
+        run: |
+          # Create app bundle structure
+          mkdir -p deploy/ConvertRT.app/Contents/{MacOS,Resources,Frameworks}
+          
+          # Find and copy the executable
+          if [ -f "build/convertrt" ]; then
+            cp build/convertrt deploy/ConvertRT.app/Contents/MacOS/ConvertRT
+          elif [ -f "build/bin/convertrt" ]; then
+            cp build/bin/convertrt deploy/ConvertRT.app/Contents/MacOS/ConvertRT
+          else
+            echo "Error: convertrt executable not found"
+            exit 1
+          fi
+          
+          # Copy config file if it exists
+          if [ -f "config.ini" ]; then
+            cp config.ini deploy/ConvertRT.app/Contents/Resources/
+          fi
+          
+          # Create Info.plist
+          cat > deploy/ConvertRT.app/Contents/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>ConvertRT</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.convertrt.app</string>
+              <key>CFBundleName</key>
+              <string>ConvertRT</string>
+              <key>CFBundleDisplayName</key>
+              <string>ConvertRT</string>
+              <key>CFBundleVersion</key>
+              <string>1.0</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>10.15</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSRequiresAquaSystemAppearance</key>
+              <false/>
+          </dict>
+          </plist>
+          EOF
+          
+          # Use macdeployqt to bundle Qt frameworks
+          ${{ github.workspace }}/Qt/Qt/${{ matrix.qt_version }}/clang_64/bin/macdeployqt deploy/ConvertRT.app
+          
+          # Create a DMG-ready folder
+          mkdir -p deploy/dmg
+          cp -R deploy/ConvertRT.app deploy/dmg/
+          
+          # Create a simple README for the DMG
+          cat > deploy/dmg/README.txt << 'EOF'
+          ConvertRT - Word to HTML/RTF Converter
+          
+          To install:
+          1. Drag ConvertRT.app to your Applications folder
+          2. Double-click to run
+          
+          Configuration:
+          - Config file is located inside the app bundle
+          - Right-click app -> Show Package Contents -> Contents/Resources/config.ini
+          
+          System Requirements:
+          - macOS 10.15 or later
+          - Intel or Apple Silicon Mac
+          EOF
+          
+          # List contents for debugging
+          echo "App bundle contents:"
+          find deploy -name "*.app" -type d -exec ls -la {} \;
+          find deploy -name "*.dylib" -type f | head -10
 
       - name: Upload macOS build
-        if: always()   # still runs even if the build step fails
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: convertrt-macos-qt6.5-shared-${{ matrix.shared }}
-          path: |
-            build/**/*.app
-            build/**/*.dylib
+          name: convertrt-macos-qt6-ready-to-use
+          path: deploy/**

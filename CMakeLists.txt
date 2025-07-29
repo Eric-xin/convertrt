@@ -44,6 +44,24 @@ if(WIN32)
     endif()
 endif()
 
+# macOS-specific settings
+if(APPLE)
+    # Enable app bundle creation with cmake --build . --target bundle
+    set_target_properties(convertrt PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "ConvertRT"
+        MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
+        MACOSX_BUNDLE_IDENTIFIER "com.convertrt.app"
+        MACOSX_BUNDLE_INFO_STRING "Word to HTML/RTF Converter"
+    )
+    
+    # Set minimum macOS version
+    set_target_properties(convertrt PROPERTIES
+        MACOSX_DEPLOYMENT_TARGET "10.15"
+    )
+endif()
+
 # Copy config file to build directory
 if(EXISTS "${CMAKE_SOURCE_DIR}/config.ini")
     configure_file("${CMAKE_SOURCE_DIR}/config.ini" "${CMAKE_BINARY_DIR}/config.ini" COPYONLY)
@@ -54,9 +72,16 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/config.ini")
 endif()
 
 # Install rules for packaging
-install(TARGETS convertrt
-    RUNTIME DESTINATION .
-)
+if(APPLE)
+    install(TARGETS convertrt
+        BUNDLE DESTINATION .
+        RUNTIME DESTINATION .
+    )
+else()
+    install(TARGETS convertrt
+        RUNTIME DESTINATION .
+    )
+endif()
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/config.ini")
     install(FILES config.ini DESTINATION .)
