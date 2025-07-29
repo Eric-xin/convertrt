@@ -34,3 +34,12 @@ jobs:
 
     - name: Build
       run: cmake --build ${{github.workspace}}/build
+    
+    - name: Upload Ubuntu build
+      if: always()   # still runs even if the build step fails
+      uses: actions/upload-artifact@v4
+      with:
+        name: convertrt-ubuntu-qt6.5-shared-${{ matrix.shared }}
+        path: |
+          build/**/*.deb
+          build/**/*.so
