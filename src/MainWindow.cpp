@@ -31,6 +31,7 @@
 #include <QDebug>
 #include <QTimer>
 #include <QSet>
+#include <QRandomGenerator>
 
 #include <QSettings>
 
@@ -305,36 +306,73 @@ void MainWindow::copyRtf() {
 void MainWindow::confirmAndUpload() {
     QRegularExpression re(R"(data:image/[^;]+;base64,[^"']+)");
     auto it = re.globalMatch(_fullHtml);
-    QStringList uris;
-    while (it.hasNext()) uris << it.next().captured(0);
-    uris.removeDuplicates();
-    int total = uris.size();
+    
+    // Store each image instance separately, even if they're identical
+    QList<QString> allDataUris;
+    QList<QString> uploadedUrls;
+    
+    while (it.hasNext()) {
+        auto match = it.next();
+        allDataUris.append(match.captured(0));
+    }
+    
+    int total = allDataUris.size();
     if (!total) return;
+
+    qDebug() << "Found" << total << "images to upload";
 
     QProgressDialog pd("Uploading images…", "Cancel", 0, total, this);
     pd.setWindowModality(Qt::WindowModal);
     pd.show();
 
     int success = 0;
-    QString newHtml = _fullHtml;
-
-    for (int i = 0; i < uris.size(); ++i) {
+    uploadedUrls.resize(total); // Pre-allocate to match allDataUris size
+    
+    // Upload each image individually, creating unique URLs for each instance
+    for (int i = 0; i < allDataUris.size(); ++i) {
         if (pd.wasCanceled()) break;
-        QString uri = uris.at(i);
+        
+        QString uri = allDataUris[i];
         QString header = uri.section(',', 0, 0) + ",";
         QByteArray data = QByteArray::fromBase64(uri.section(',', 1).toLatin1());
+        
+        qDebug() << "Uploading image" << (i+1) << "of" << total << "- size:" << data.size() << "bytes";
+        
         try {
-            QString url = uploadToOss(header, data);
-            newHtml.replace(uri, url);
+            QString uploadedUrl = uploadToOss(header, data);
+            uploadedUrls[i] = uploadedUrl;
             ++success;
+            qDebug() << "Successfully uploaded image" << (i+1) << "to:" << uploadedUrl;
+        } catch (const QString &error) {
+            qDebug() << "Failed to upload image" << (i+1) << ":" << error;
+            uploadedUrls[i] = QString(); // Mark as failed
         } catch (...) {
+            qDebug() << "Failed to upload image" << (i+1) << ": Unknown error";
+            uploadedUrls[i] = QString(); // Mark as failed
         }
+        
         pd.setValue(i + 1);
         pd.setLabelText(QString("%1/%2 — %3 succeeded")
                         .arg(i+1).arg(total).arg(success));
         QCoreApplication::processEvents();
     }
     pd.close();
+    
+    // Replace data URIs one by one, in order
+    QString newHtml = _fullHtml;
+    for (int i = 0; i < allDataUris.size(); ++i) {
+        if (!uploadedUrls[i].isEmpty()) {
+            QString dataUri = allDataUris[i];
+            QString uploadedUrl = uploadedUrls[i];
+            
+            // Replace the first occurrence of this data URI
+            int pos = newHtml.indexOf(dataUri);
+            if (pos != -1) {
+                newHtml.replace(pos, dataUri.length(), uploadedUrl);
+                qDebug() << "Replaced image" << (i+1) << "with" << uploadedUrl;
+            }
+        }
+    }
 
     _fullHtml = newHtml;
     _syncing = true;
@@ -398,11 +436,22 @@ QString MainWindow::uploadToOss(const QString &header, const QByteArray &data) {
 
     QString mime = header.section(';',0,0).section(':',1,1);
     QString ext  = mime.section('/',1,1).toLower();
-    if (ext == "jpeg") ext = "jpg";
+    // if (ext == "jpeg") ext = "jpg";
     
-    // Use the same path format as Python version
-    QString objectKey = QString("pc/course/dev/%1.%2")
-                  .arg(QString::number(QDateTime::currentSecsSinceEpoch()*1000), ext);
+    // Compute SHA1 of the first few bytes of the document for uniqueness
+    QByteArray shaInput = data.left(128); // first 128 bytes
+    QByteArray sha1 = QCryptographicHash::hash(shaInput, QCryptographicHash::Sha1).toHex();
+
+    // Add microsecond precision and random component to ensure uniqueness for each upload
+    static int uploadCounter = 0;
+    uploadCounter++;
+    
+    QString objectKey = QString("pc/course/dev/%1.%2.%3.%4.%5")
+        .arg(QString::fromUtf8(sha1.left(8))) // first 8 hex chars of sha1
+        .arg(QString::number(QDateTime::currentMSecsSinceEpoch())) // millisecond precision
+        .arg(uploadCounter) // incremental counter
+        .arg(QRandomGenerator::global()->bounded(10000)) // random component
+        .arg(ext);
 
     qDebug() << "Uploading to key:" << objectKey;
     qDebug() << "MIME type:" << mime;
