@@ -41,6 +41,7 @@ private:
     QByteArray fetchLocalImage(const QString &src, QString &header);
     QJsonObject fetchSts();
     QString uploadToOss(const QString &header, const QByteArray &data);
+    void loadExternalImages();
 
     QTextEdit          *_srcEdit;
     QTextBrowser       *_preview;

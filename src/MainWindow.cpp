@@ -29,6 +29,8 @@
 #include <QMessageAuthenticationCode>
 #include <QtNetwork/QHttpPart>
 #include <QDebug>
+#include <QTimer>
+#include <QSet>
 
 #include <QSettings>
 
@@ -171,6 +173,8 @@ void MainWindow::pasteFromWord() {
     _srcEdit->setPlainText(masked);
     _preview->setHtml(inl);
     _syncing = false;
+    // Load external images after syncing is done
+    loadExternalImages();
 }
 
 void MainWindow::syncFromSource() {
@@ -193,6 +197,87 @@ void MainWindow::syncFromSource() {
     }
     _preview->setHtml(out);
     _syncing = false;
+    // Load external images after syncing is done
+    loadExternalImages();
+}
+
+void MainWindow::loadExternalImages() {
+    if (_syncing) {
+        qDebug() << "Skipping loadExternalImages() - syncing in progress";
+        return;
+    }
+    
+    qDebug() << "loadExternalImages() called";
+    auto *doc = _preview->document();
+    const QString html = _preview->toHtml();
+
+    // Regex to find all distinct http(s) image URLs
+    QRegularExpression re(
+        R"(<img\b[^>]*\bsrc=['"](https?://[^'"]+)['"][^>]*>)",
+        QRegularExpression::CaseInsensitiveOption
+    );
+
+    QSet<QString> seen;
+    auto it = re.globalMatch(html);
+    int imageCount = 0;
+    int loadedCount = 0;
+    while (it.hasNext()) {
+        QString url = it.next().captured(1);
+        if (seen.contains(url)) continue;
+        seen.insert(url);
+        imageCount++;
+
+        qDebug() << "Loading external image:" << url;
+
+        // Synchronous fetch with timeout and error handling
+        QNetworkRequest req((QUrl(url)));
+        req.setRawHeader("User-Agent", "convertrt/1.0");
+        req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+        
+        QNetworkReply *reply = _networkManager.get(req);
+        QEventLoop loop;
+        QTimer timer;
+        timer.setSingleShot(true);
+        timer.setInterval(10000); // 10 second timeout
+        
+        // Set up connections
+        connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        connect(&timer, &QTimer::timeout, [&loop, reply]() {
+            reply->abort(); // Abort the request on timeout
+            loop.quit();
+        });
+        
+        timer.start();
+        loop.exec();
+        timer.stop();
+
+        if (reply->error() == QNetworkReply::NoError) {
+            QByteArray data = reply->readAll();
+            QImage img;
+            if (img.loadFromData(data)) {
+                doc->addResource(QTextDocument::ImageResource, QUrl(url), img);
+                qDebug() << "Successfully loaded image:" << url;
+                loadedCount++;
+            } else {
+                qDebug() << "Failed to decode image data for:" << url;
+            }
+        } else if (reply->error() == QNetworkReply::OperationCanceledError) {
+            qDebug() << "Timeout loading image:" << url;
+        } else {
+            qDebug() << "Network error loading image:" << url << "Error:" << reply->errorString();
+        }
+        reply->deleteLater();
+    }
+
+    qDebug() << "Found" << imageCount << "external images, loaded" << loadedCount << "successfully";
+    
+    // Only re-apply HTML if we loaded any images
+    if (loadedCount > 0) {
+        _syncing = true;
+        _preview->setHtml(html);
+        _syncing = false;
+    }
+    qDebug() << "loadExternalImages() completed";
 }
 
 void MainWindow::syncFromPreview() {
@@ -202,6 +287,8 @@ void MainWindow::syncFromPreview() {
     _fullHtml = inl;
     _srcEdit->setPlainText(masked);
     _syncing = false;
+    // Load external images after syncing is done
+    loadExternalImages();
 }
 
 void MainWindow::copyHtml() {
@@ -254,6 +341,8 @@ void MainWindow::confirmAndUpload() {
     _srcEdit->setPlainText(newHtml);
     _preview->setHtml(newHtml);
     _syncing = false;
+    // Load external images after syncing is done
+    loadExternalImages();
 
     QMessageBox::information(this, "Upload Complete",
         QString("Uploaded %1 of %2 images successfully.").arg(success).arg(total));
