@@ -28,16 +28,32 @@ jobs:
           arch: win64_msvc2019_64
 
       - name: Configure CMake
-        run: cmake -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DBUILD_EXAMPLES=OFF -B "${{ github.workspace }}/build"
+        run: cmake -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DBUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release -B "${{ github.workspace }}/build"
 
       - name: Build
-        run: cmake --build "${{ github.workspace }}/build"
-    
+        run: cmake --build "${{ github.workspace }}/build" --config Release
+
+      - name: Deploy Qt application
+        run: |
+          # Create deployment directory
+          mkdir deploy
+          
+          # Copy the executable
+          copy "build\Release\convertrt.exe" "deploy\"
+          
+          # Copy config file if it exists
+          if exist "config.ini" copy "config.ini" "deploy\"
+          
+          # Use windeployqt to bundle Qt DLLs and dependencies
+          $env:PATH += ";${{ github.workspace }}\Qt\Qt\${{ matrix.qt_version }}\msvc2019_64\bin"
+          windeployqt.exe --release --no-translations --no-system-d3d-compiler --no-opengl-sw deploy\convertrt.exe
+          
+          # List contents for debugging
+          dir deploy /s
+
       - name: Upload Windows build
-        if: always()  # still runs even if the build step fails
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: convertrt-windows-qt6.5-shared-${{ matrix.shared }}
-          path: |
-            build\**\*.exe
-            build\**\*.dll
+          name: convertrt-windows-qt${{ matrix.qt_version }}-ready-to-use
+          path: deploy\**
