@@ -35,26 +35,55 @@ jobs:
 
       - name: Create macOS app bundle
         run: |
+          # Debug: Show what was built
+          echo "=== Build output contents ==="
+          find build -name "convertrt*" -type f 2>/dev/null || echo "No convertrt files found"
+          find build -name "*.app" -type d 2>/dev/null || echo "No .app directories found"
+          ls -la build/ || echo "build directory not found"
+          ls -la build/bin/ 2>/dev/null || echo "build/bin directory not found"
+          
           # Create app bundle structure
           mkdir -p deploy/ConvertRT.app/Contents/{MacOS,Resources,Frameworks}
           
-          # Find and copy the executable
-          if [ -f "build/convertrt" ]; then
+          # Find and copy the executable - check all possible locations
+          if [ -f "build/bin/convertrt.app/Contents/MacOS/convertrt" ]; then
+            echo "Found app bundle executable"
+            cp build/bin/convertrt.app/Contents/MacOS/convertrt deploy/ConvertRT.app/Contents/MacOS/ConvertRT
+          elif [ -f "build/convertrt.app/Contents/MacOS/convertrt" ]; then
+            echo "Found app bundle executable in build root"
+            cp build/convertrt.app/Contents/MacOS/convertrt deploy/ConvertRT.app/Contents/MacOS/ConvertRT
+          elif [ -f "build/convertrt" ]; then
+            echo "Found standalone executable in build root"
             cp build/convertrt deploy/ConvertRT.app/Contents/MacOS/ConvertRT
           elif [ -f "build/bin/convertrt" ]; then
+            echo "Found standalone executable in build/bin"
             cp build/bin/convertrt deploy/ConvertRT.app/Contents/MacOS/ConvertRT
           else
-            echo "Error: convertrt executable not found"
+            echo "Error: convertrt executable not found in any expected location"
+            echo "Available files in build:"
+            find build -type f -name "*convertrt*" 2>/dev/null || echo "No convertrt files found"
             exit 1
           fi
           
+          # Make executable
+          chmod +x deploy/ConvertRT.app/Contents/MacOS/ConvertRT
+          
           # Copy config file if it exists
           if [ -f "config.ini" ]; then
+            echo "Copying config.ini to app bundle"
             cp config.ini deploy/ConvertRT.app/Contents/Resources/
+          else
+            echo "Warning: config.ini not found, creating default"
+            cat > deploy/ConvertRT.app/Contents/Resources/config.ini << 'CONFIGEOF'
+          [oss]
+          sts_url=https://your-api-endpoint.com/system/oss/getSts
+          oss_upload_url=https://your-bucket.oss-region.aliyuncs.com
+          oss_base_url=https://your-bucket.oss-region.aliyuncs.com
+          CONFIGEOF
           fi
           
           # Create Info.plist
-          cat > deploy/ConvertRT.app/Contents/Info.plist << 'EOF'
+          cat > deploy/ConvertRT.app/Contents/Info.plist << 'PLISTEOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -81,17 +110,35 @@ jobs:
               <false/>
           </dict>
           </plist>
-          EOF
+          PLISTEOF
           
           # Use macdeployqt to bundle Qt frameworks
-          ${{ github.workspace }}/Qt/Qt/${{ matrix.qt_version }}/clang_64/bin/macdeployqt deploy/ConvertRT.app
+          echo "Running macdeployqt..."
+          MACDEPLOYQT_PATH="${{ github.workspace }}/Qt/Qt/${{ matrix.qt_version }}/clang_64/bin/macdeployqt"
+          if [ ! -f "$MACDEPLOYQT_PATH" ]; then
+            # Try alternative paths
+            for path in "${{ github.workspace }}/Qt/${{ matrix.qt_version }}/clang_64/bin/macdeployqt" "${{ github.workspace }}/Qt/bin/macdeployqt" "$(which macdeployqt)"; do
+              if [ -f "$path" ]; then
+                MACDEPLOYQT_PATH="$path"
+                break
+              fi
+            done
+          fi
+          
+          if [ -f "$MACDEPLOYQT_PATH" ]; then
+            echo "Using macdeployqt from: $MACDEPLOYQT_PATH"
+            "$MACDEPLOYQT_PATH" deploy/ConvertRT.app -verbose=2
+          else
+            echo "Warning: macdeployqt not found, app may not be portable"
+            echo "Searched paths but macdeployqt not available"
+          fi
           
           # Create a DMG-ready folder
           mkdir -p deploy/dmg
           cp -R deploy/ConvertRT.app deploy/dmg/
           
           # Create a simple README for the DMG
-          cat > deploy/dmg/README.txt << 'EOF'
+          cat > deploy/dmg/README.txt << 'READMEEOF'
           ConvertRT - Word to HTML/RTF Converter
           
           To install:
@@ -105,7 +152,7 @@ jobs:
           System Requirements:
           - macOS 10.15 or later
           - Intel or Apple Silicon Mac
-          EOF
+          READMEEOF
           
           # List contents for debugging
           echo "App bundle contents:"
