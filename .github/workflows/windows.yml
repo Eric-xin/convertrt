@@ -57,5 +57,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: convertrt-windows-qt${{ matrix.qt_version }}-ready-to-use
+          name: convertrt-windows-qt-ready-to-use
           path: deploy\**
