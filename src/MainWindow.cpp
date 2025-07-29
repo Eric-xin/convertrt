@@ -176,6 +176,9 @@ void MainWindow::pasteFromWord() {
     _syncing = false;
     // Load external images after syncing is done
     loadExternalImages();
+
+    // use html from preview
+    MainWindow::syncFromPreview();
 }
 
 void MainWindow::syncFromSource() {
